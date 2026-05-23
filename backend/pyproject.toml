@@ -1,0 +1,14 @@
+[project]
+name = "watchgold-backend"
+version = "0.1.0"
+description = "金价守望后端"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "sqlalchemy",
+  "httpx",
+  "pydantic",
+  "python-dotenv",
+  "tzdata",
+]
