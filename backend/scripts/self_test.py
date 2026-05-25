@@ -160,6 +160,12 @@ def main() -> None:
         assert_status(market_summary, 200, "公开行情摘要")
         assert Decimal(market_summary.json()["current_price"]) == Decimal("1004.1000")
 
+        minute_averages = client.get("/api/market/minute-averages?limit=10")
+        assert_status(minute_averages, 200, "公开每分钟均价")
+        average_data = minute_averages.json()
+        assert average_data
+        assert "average_price" in average_data[0]
+
         ticks = client.get("/api/market/ticks?limit=10", headers=headers)
         assert_status(ticks, 200, "历史行情")
         assert len(ticks.json()) == 5
@@ -174,6 +180,10 @@ def main() -> None:
         candles = client.get("/api/candles?interval=300&limit=10", headers=headers)
         assert_status(candles, 200, "分钟线")
         assert len(candles.json()) >= 1
+
+        two_hour_candles = client.get("/api/candles?interval=7200&limit=10")
+        assert_status(two_hour_candles, 200, "2 小时分钟线")
+        assert len(two_hour_candles.json()) >= 1
 
         buy = client.post(
             "/api/trades",

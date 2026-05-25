@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -14,11 +14,17 @@ from app.schemas.market import (
     LatestPriceResponse,
     MarketStatusResponse,
     MarketSummaryResponse,
+    MinuteAverageResponse,
     PriceTickResponse,
 )
 from app.services.price_collector import collector
-from app.services.settings_service import get_int_setting, get_setting
-from app.services.trading_calendar import trading_window_description
+from app.services.settings_service import get_bool_setting, get_int_setting, get_setting
+from app.services.trading_calendar import (
+    is_accumulation_gold_trading_time,
+    trading_lookback_start,
+    trading_window_description,
+    trading_zone,
+)
 
 
 router = APIRouter(prefix="/market", tags=["行情"])
@@ -61,6 +67,68 @@ def ticks(
         stmt = stmt.where(PriceTick.fetched_at <= end)
     stmt = stmt.order_by(PriceTick.fetched_at.desc(), PriceTick.id.desc()).limit(limit)
     return list(db.scalars(stmt).all())
+
+
+@router.get("/minute-averages", response_model=list[MinuteAverageResponse])
+def minute_averages(
+    limit: int = Query(default=3000, ge=1, le=5000),
+    start: datetime | None = None,
+    end: datetime | None = None,
+    db: Session = Depends(get_db),
+) -> list[MinuteAverageResponse]:
+    timezone_name = get_setting(db, "trading_timezone", "Asia/Shanghai")
+    window_hours = get_int_setting(db, "market_visualization_window_hours", 48)
+    trading_hours_enabled = get_bool_setting(db, "accumulation_gold_trading_hours_enabled", True)
+    effective_end = end or datetime.now(timezone.utc)
+    effective_start = start or (
+        trading_lookback_start(
+            effective_end,
+            hours=window_hours,
+            timezone_name=timezone_name,
+        )
+        if trading_hours_enabled
+        else effective_end - timedelta(hours=window_hours)
+    )
+    zone = trading_zone(timezone_name)
+    ticks_in_window = db.scalars(
+        select(PriceTick)
+        .where(PriceTick.fetched_at >= effective_start)
+        .where(PriceTick.fetched_at <= effective_end)
+        .order_by(PriceTick.fetched_at.asc(), PriceTick.id.asc())
+    ).all()
+
+    buckets: dict[datetime, dict[str, Decimal | int]] = {}
+    for tick in ticks_in_window:
+        fetched_at = tick.fetched_at
+        if fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+        fetched_at = fetched_at.astimezone(timezone.utc)
+        if trading_hours_enabled and not is_accumulation_gold_trading_time(
+            fetched_at,
+            timezone_name=timezone_name,
+        ):
+            continue
+        bucket_start = (
+            fetched_at.astimezone(zone)
+            .replace(second=0, microsecond=0)
+            .astimezone(timezone.utc)
+        )
+        bucket = buckets.setdefault(
+            bucket_start,
+            {"total": Decimal("0"), "count": 0},
+        )
+        bucket["total"] = Decimal(bucket["total"]) + Decimal(tick.price)
+        bucket["count"] = int(bucket["count"]) + 1
+
+    points = [
+        MinuteAverageResponse(
+            bucket_start=bucket_start,
+            average_price=Decimal(data["total"]) / Decimal(int(data["count"])),
+            count=int(data["count"]),
+        )
+        for bucket_start, data in sorted(buckets.items(), reverse=True)
+    ]
+    return points[:limit]
 
 
 @router.get("/status", response_model=MarketStatusResponse)

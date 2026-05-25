@@ -36,6 +36,12 @@ export type PriceTick = {
   created_at: string;
 };
 
+export type MinuteAveragePoint = {
+  bucket_start: string;
+  average_price: string;
+  count: number;
+};
+
 export type Candle = {
   id: number;
   interval_seconds: number;

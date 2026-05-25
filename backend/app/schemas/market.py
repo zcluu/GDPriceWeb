@@ -15,6 +15,12 @@ class PriceTickResponse(APIModel):
     created_at: datetime
 
 
+class MinuteAverageResponse(APIModel):
+    bucket_start: datetime
+    average_price: Decimal
+    count: int
+
+
 class LatestPriceResponse(APIModel):
     price: Decimal | None = None
     source: str | None = None

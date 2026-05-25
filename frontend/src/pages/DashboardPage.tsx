@@ -10,7 +10,7 @@ import QuickTradeForm from "../components/QuickTradeForm";
 import { fmtMoney, fmtTime, intervalText, statusText, trendClass } from "../utils";
 import { useAuthStore } from "../store";
 
-const intervals = [60, 300, 600, 900, 1800, 3600];
+const intervals = [60, 300, 600, 900, 1800, 3600, 7200];
 
 function eventTypeText(type: string) {
   const map: Record<string, string> = {
@@ -46,14 +46,21 @@ export default function DashboardPage() {
   });
   const loginUrl = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`;
 
-  const [latestQuery, statusQuery, summaryQuery, portfolioQuery, ticksQuery, candlesQuery, tradesQuery, eventsQuery] = useQueries({
+  const candleLimit = 3000;
+
+  const [latestQuery, statusQuery, summaryQuery, portfolioQuery, linePointsQuery, candlesQuery, tradesQuery, eventsQuery] = useQueries({
     queries: [
       { queryKey: ["latest"], queryFn: api.latest, refetchInterval: 15000 },
       { queryKey: ["status"], queryFn: api.status, refetchInterval: 15000 },
       { queryKey: ["market-summary"], queryFn: api.marketSummary, refetchInterval: 15000 },
       { queryKey: ["portfolio"], queryFn: api.portfolio, refetchInterval: 15000, enabled: isAuthed },
-      { queryKey: ["ticks"], queryFn: () => api.ticks(800), refetchInterval: 15000 },
-      { queryKey: ["candles", interval], queryFn: () => api.candles(interval, 800), refetchInterval: 15000 },
+      { queryKey: ["minute-averages"], queryFn: () => api.minuteAverages(3000), refetchInterval: 15000 },
+      {
+        queryKey: ["candles", interval, candleLimit],
+        queryFn: () => api.candles(interval, candleLimit),
+        refetchInterval: 15000,
+        enabled: chartMode === "candle"
+      },
       { queryKey: ["trades"], queryFn: api.trades, enabled: isAuthed },
       { queryKey: ["events"], queryFn: api.events, refetchInterval: 15000, enabled: isAuthed }
     ]
@@ -69,7 +76,7 @@ export default function DashboardPage() {
   const status = statusQuery.data;
   const summary = summaryQuery.data;
   const portfolio = portfolioQuery.data;
-  const ticks = ticksQuery.data || [];
+  const linePoints = linePointsQuery.data || [];
   const candles = candlesQuery.data || [];
   const trades = tradesQuery.data || [];
   const events = eventsQuery.data || [];
@@ -84,10 +91,7 @@ export default function DashboardPage() {
   const activeEventTypes = visibleEventTypes ?? eventTypeOptions.map((item) => item.value);
   const filteredEvents = events.filter((event) => activeEventTypes.includes(event.event_type));
 
-  const lastChange = useMemo(() => {
-    if (ticks.length < 2) return 0;
-    return Number(ticks[0].price) - Number(ticks[1].price);
-  }, [ticks]);
+  const lastChange = Number(summary?.change_amount || 0);
 
   useEffect(() => {
     const action = searchParams.get("ding_action");
@@ -116,7 +120,7 @@ export default function DashboardPage() {
     <div className="page">
       <PageHeader
         title="行情看板"
-        subtitle="最近 48 小时积存金价格、持仓和提醒状态集中在这里。"
+        subtitle="最近 48 个交易小时积存金价格、持仓和提醒状态集中在这里。"
         actions={
           <>
             <button className="ghost-button" onClick={() => window.location.reload()}>
@@ -178,7 +182,11 @@ export default function DashboardPage() {
           <div className="panel-toolbar">
             <div>
               <h2>价格走势</h2>
-              <p>默认最近 {status?.visualization_window_hours || 48} 小时</p>
+              <p>
+                {chartMode === "line"
+                  ? `最近 ${status?.visualization_window_hours || 48} 个交易小时，每分钟均价`
+                  : `最近 ${status?.visualization_window_hours || 48} 个交易小时，${intervalText(interval)} 周期`}
+              </p>
             </div>
             <div className="toolbar-controls">
               <div className="segmented compact">
@@ -189,16 +197,24 @@ export default function DashboardPage() {
                   分钟线
                 </button>
               </div>
-              <select value={interval} onChange={(event) => setIntervalValue(Number(event.target.value))}>
-                {intervals.map((item) => (
-                  <option key={item} value={item}>
-                    {intervalText(item)}
-                  </option>
-                ))}
-              </select>
+              {chartMode === "candle" && (
+                <select value={interval} onChange={(event) => setIntervalValue(Number(event.target.value))}>
+                  {intervals.map((item) => (
+                    <option key={item} value={item}>
+                      {intervalText(item)}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           </div>
-          <PriceChart ticks={ticks} candles={candles} trades={isAuthed ? trades : []} events={isAuthed ? filteredEvents : []} mode={chartMode} />
+          <PriceChart
+            linePoints={linePoints}
+            candles={candles}
+            trades={isAuthed ? trades : []}
+            events={isAuthed ? filteredEvents : []}
+            mode={chartMode}
+          />
         </div>
 
         {isAuthed ? (

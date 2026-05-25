@@ -6,6 +6,7 @@ import type {
   LatestPrice,
   MarketSummary,
   MarketStatus,
+  MinuteAveragePoint,
   Portfolio,
   PriceTick,
   SettingsPayload,
@@ -23,6 +24,8 @@ export const api = {
   marketSummary: () => request<MarketSummary>("/market/summary"),
   status: () => request<MarketStatus>("/market/status"),
   ticks: (limit = 600) => request<PriceTick[]>(`/market/ticks?limit=${limit}`),
+  minuteAverages: (limit = 3000) =>
+    request<MinuteAveragePoint[]>(`/market/minute-averages?limit=${limit}`),
   candles: (interval = 300, limit = 600) =>
     request<Candle[]>(`/candles?interval=${interval}&limit=${limit}`),
   portfolio: () => request<Portfolio>("/trades/portfolio"),

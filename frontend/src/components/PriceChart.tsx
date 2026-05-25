@@ -1,10 +1,10 @@
 import ReactECharts from "echarts-for-react";
 import dayjs from "dayjs";
-import type { AlertEvent, Candle, PriceTick, Trade } from "../api/types";
+import type { AlertEvent, Candle, MinuteAveragePoint, Trade } from "../api/types";
 import { fmtMoney } from "../utils";
 
 type Props = {
-  ticks: PriceTick[];
+  linePoints: MinuteAveragePoint[];
   candles: Candle[];
   trades: Trade[];
   events: AlertEvent[];
@@ -19,9 +19,10 @@ function movingAverage(values: number[], period: number) {
   });
 }
 
-export default function PriceChart({ ticks, candles, trades, events, mode }: Props) {
-  const sortedTicks = [...ticks].reverse();
+export default function PriceChart({ linePoints, candles, trades, events, mode }: Props) {
+  const sortedLinePoints = [...linePoints].reverse();
   const sortedCandles = [...candles].reverse();
+  const lineAxis = sortedLinePoints.map((item) => dayjs(item.bucket_start).format("MM-DD HH:mm"));
   const candleAxis = sortedCandles.map((item) => dayjs(item.bucket_start).format("MM-DD HH:mm"));
   const candleValues = sortedCandles.map((item) => [
     Number(item.open),
@@ -35,39 +36,38 @@ export default function PriceChart({ ticks, candles, trades, events, mode }: Pro
     { name: "10段均线", period: 10, color: "#b8872e" },
     { name: "20段均线", period: 20, color: "#315d91" }
   ];
-  const tickTimes = new Set(sortedTicks.map((tick) => dayjs(tick.fetched_at).format("MM-DD HH:mm")));
+  const lineTimes = new Set(lineAxis);
+  const nearestLineLabel = (value: string) => {
+    const exactTime = dayjs(value).format("MM-DD HH:mm");
+    if (lineTimes.has(exactTime)) return exactTime;
+    const nearest = sortedLinePoints.reduce<MinuteAveragePoint | null>((current, point) => {
+      if (!current) return point;
+      const pointDiff = Math.abs(dayjs(point.bucket_start).valueOf() - dayjs(value).valueOf());
+      const currentDiff = Math.abs(dayjs(current.bucket_start).valueOf() - dayjs(value).valueOf());
+      return pointDiff < currentDiff ? point : current;
+    }, null);
+    return nearest ? dayjs(nearest.bucket_start).format("MM-DD HH:mm") : exactTime;
+  };
   const buyMarks = trades
     .filter((trade) => trade.side === "BUY")
     .map((trade) => ({
       name: "买入",
-      coord: [dayjs(trade.traded_at).format("MM-DD HH:mm"), Number(trade.price)],
+      coord: [nearestLineLabel(trade.traded_at), Number(trade.price)],
       value: `买入 ${fmtMoney(trade.grams)} 克`
     }));
   const sellMarks = trades
     .filter((trade) => trade.side === "SELL")
     .map((trade) => ({
       name: "卖出",
-      coord: [dayjs(trade.traded_at).format("MM-DD HH:mm"), Number(trade.price)],
+      coord: [nearestLineLabel(trade.traded_at), Number(trade.price)],
       value: `卖出 ${fmtMoney(trade.grams)} 克`
     }));
   const eventMarks = events
     .filter((event) => event.price)
     .map((event) => {
-      const exactTime = dayjs(event.created_at).format("MM-DD HH:mm");
-      const nearestTick = sortedTicks.reduce<PriceTick | null>((nearest, tick) => {
-        if (!nearest) return tick;
-        const tickDiff = Math.abs(dayjs(tick.fetched_at).valueOf() - dayjs(event.created_at).valueOf());
-        const nearestDiff = Math.abs(dayjs(nearest.fetched_at).valueOf() - dayjs(event.created_at).valueOf());
-        return tickDiff < nearestDiff ? tick : nearest;
-      }, null);
-      const xValue = tickTimes.has(exactTime)
-        ? exactTime
-        : nearestTick
-          ? dayjs(nearestTick.fetched_at).format("MM-DD HH:mm")
-          : exactTime;
       return {
         name: "异动",
-        coord: [xValue, Number(event.price)],
+        coord: [nearestLineLabel(event.created_at), Number(event.price)],
         value: event.triggered_level ? `${event.rule_name} ${event.triggered_level} 档` : event.rule_name,
         itemStyle: { color: event.event_type === "RANGE_STEP_AMOUNT" ? "#c63d3d" : "#b8872e" }
       };
@@ -80,7 +80,7 @@ export default function PriceChart({ ticks, candles, trades, events, mode }: Pro
           tooltip: { trigger: "axis" },
           xAxis: {
             type: "category",
-            data: sortedTicks.map((tick) => dayjs(tick.fetched_at).format("MM-DD HH:mm")),
+            data: lineAxis,
             boundaryGap: false,
             axisLine: { lineStyle: { color: "#d5dfd9" } },
             axisLabel: { color: "#68766d" }
@@ -98,7 +98,7 @@ export default function PriceChart({ ticks, candles, trades, events, mode }: Pro
               type: "line",
               smooth: true,
               symbol: "none",
-              data: sortedTicks.map((tick) => Number(tick.price)),
+              data: sortedLinePoints.map((point) => Number(point.average_price)),
               lineStyle: { color: "#2f8a91", width: 2 },
               areaStyle: { color: "rgba(47, 138, 145, .12)" },
               markPoint: {
@@ -157,11 +157,15 @@ export default function PriceChart({ ticks, candles, trades, events, mode }: Pro
           ]
         };
 
-  if (!ticks.length && !candles.length) {
+  if ((mode === "line" && !linePoints.length) || (mode === "candle" && !candles.length)) {
     return (
       <div className="empty-chart">
         <strong>暂无行情数据</strong>
-        <span>后台采集到第一条价格后，这里会显示最近 48 小时走势。</span>
+        <span>
+          {mode === "line"
+            ? "后台采集到第一条价格后，这里会显示最近 48 个交易小时走势。"
+            : "当前周期暂无分钟线数据，后台采集后会自动生成。"}
+        </span>
       </div>
     );
   }

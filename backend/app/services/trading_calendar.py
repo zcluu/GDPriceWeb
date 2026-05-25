@@ -70,6 +70,23 @@ def next_trading_start(
     return candidate.astimezone(timezone.utc)
 
 
+def trading_lookback_start(
+    value: datetime | None = None,
+    *,
+    hours: int = 48,
+    timezone_name: str | None = None,
+) -> datetime:
+    zone = trading_zone(timezone_name)
+    cursor = ensure_aware_utc(value or utc_now()).astimezone(zone)
+    cursor = cursor.replace(second=0, microsecond=0)
+    remaining_minutes = max(1, hours) * 60
+
+    while remaining_minutes > 0:
+        cursor -= timedelta(minutes=1)
+        if is_accumulation_gold_trading_time(cursor, timezone_name=timezone_name):
+            remaining_minutes -= 1
+    return cursor.astimezone(timezone.utc)
+
+
 def trading_window_description() -> str:
     return "周一 09:00 至周六 02:00（中国时间）"
-
